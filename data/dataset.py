@@ -8,7 +8,10 @@ from data import util
 import numpy as np
 from utils.config import opt
 
+#读取数据，并对数据进行预处理，调用了util里面的工具包，即处理函数
 
+#首先读取opt.caffe_pretrain判断是否使用caffe_pretrain进行预训练如果是的话，对图片进行逆正则化处理，
+# 就是将图片处理成caffe模型需要的格式
 def inverse_normalize(img):
     if opt.caffe_pretrain:
         img = img + (np.array([122.7717, 115.9465, 102.9801]).reshape(3, 1, 1))
@@ -16,7 +19,7 @@ def inverse_normalize(img):
     # approximate un-normalize for visualize
     return (img * 0.225 + 0.45).clip(min=0, max=1) * 255
 
-
+#针对torchvision预训练模型的图像正则化
 def pytorch_normalze(img):
     """
     https://github.com/pytorch/vision/issues/223
@@ -24,10 +27,10 @@ def pytorch_normalze(img):
     """
     normalize = tvtsf.Normalize(mean=[0.485, 0.456, 0.406],
                                 std=[0.229, 0.224, 0.225])
-    img = normalize(t.from_numpy(img))
+    img = normalize(t.from_numpy(img).double())
     return img.numpy()
 
-
+#针对caffe预训练模型的图像正则化
 def caffe_normalize(img):
     """
     return appr -125-125 BGR
@@ -38,7 +41,7 @@ def caffe_normalize(img):
     img = (img - mean).astype(np.float32, copy=True)
     return img
 
-
+#对图像进行正则化预处理
 def preprocess(img, min_size=600, max_size=1000):
     """Preprocess an image for feature extraction.
 
@@ -73,7 +76,7 @@ def preprocess(img, min_size=600, max_size=1000):
         normalize = pytorch_normalze
     return normalize(img)
 
-
+#对图像进行几何变换
 class Transform(object):
 
     def __init__(self, min_size=600, max_size=1000):
@@ -85,7 +88,9 @@ class Transform(object):
         _, H, W = img.shape
         img = preprocess(img, self.min_size, self.max_size)
         _, o_H, o_W = img.shape
+        #放缩前后相除，得出放缩比因子
         scale = o_H / H
+        #重新调整bboxes框的大小
         bbox = util.resize_bbox(bbox, (H, W), (o_H, o_W))
 
         # horizontally flip
@@ -96,7 +101,7 @@ class Transform(object):
 
         return img, bbox, label, scale
 
-
+#结合一系列操作。一个个读取数据，然后将图像进行变换和归一化处理（针对训练）
 class Dataset:
     def __init__(self, opt):
         self.opt = opt
@@ -114,7 +119,7 @@ class Dataset:
     def __len__(self):
         return len(self.db)
 
-
+#同上，不过针对测试。去掉了图像变换transform操作
 class TestDataset:
     def __init__(self, opt, split='test', use_difficult=True):
         self.opt = opt

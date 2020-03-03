@@ -27,62 +27,74 @@ def GET_BLOCKS(N, K=CUDA_NUM_THREADS):
 
 
 class RoI(Function):
-    def __init__(self, outh, outw, spatial_scale):
-        self.forward_fn = load_kernel('roi_forward', kernel_forward)
-        self.backward_fn = load_kernel('roi_backward', kernel_backward)
-        self.outh, self.outw, self.spatial_scale = outh, outw, spatial_scale
-
-    def forward(self, x, rois):
+    #def __init__(ctx, outh, outw, spatial_scale):
+    #    ctx.forward_fn = load_kernel('roi_forward', kernel_forward)
+     #   ctx.backward_fn = load_kernel('roi_backward', kernel_backward)
+    #    ctx.outh, ctx.outw, ctx.spatial_scale = outh, outw, spatial_scale
+    @staticmethod
+    def forward(ctx, x, rois, outh, outw, spatial_scale):
         # NOTE: MAKE SURE input is contiguous too
+        forward_fn = load_kernel('roi_forward', kernel_forward)
+        #backward_fn = load_kernel('roi_backward', kernel_backward)
+        #outh, outw, spatial_scale = outh, outw, spatial_scale
+        #ctx.save_for_backward(outh, outw, spatial_scale) 
+        ctx.outh=outh
+        ctx.outw=outw
+        ctx.spatial_scale=spatial_scale
         x = x.contiguous()
         rois = rois.contiguous()
-        self.in_size = B, C, H, W = x.size()
-        self.N = N = rois.size(0)
-        output = t.zeros(N, C, self.outh, self.outw).cuda()
-        self.argmax_data = t.zeros(N, C, self.outh, self.outw).int().cuda()
-        self.rois = rois
+        ctx.in_size = B, C, H, W = x.size()
+        ctx.N = N = rois.size(0)
+        output = t.zeros(N, C, ctx.outh, ctx.outw).cuda()
+        ctx.argmax_data = t.zeros(N, C, ctx.outh, ctx.outw).int().cuda()
+        ctx.rois = rois
         args = [x.data_ptr(), rois.data_ptr(),
                 output.data_ptr(),
-                self.argmax_data.data_ptr(),
-                self.spatial_scale, C, H, W,
-                self.outh, self.outw,
+                ctx.argmax_data.data_ptr(),
+                ctx.spatial_scale, C, H, W,
+                ctx.outh, ctx.outw,
                 output.numel()]
         stream = Stream(ptr=torch.cuda.current_stream().cuda_stream)
-        self.forward_fn(args=args,
+        forward_fn(args=args,
                         block=(CUDA_NUM_THREADS, 1, 1),
                         grid=(GET_BLOCKS(output.numel()), 1, 1),
                         stream=stream)
         return output
-
-    def backward(self, grad_output):
+    @staticmethod
+    def backward(ctx, grad_output):
         ##NOTE: IMPORTANT CONTIGUOUS
         # TODO: input
+        backward_fn = load_kernel('roi_backward', kernel_backward)
+        #outh, outw, spatial_scale=ctx.saved_variables
         grad_output = grad_output.contiguous()
-        B, C, H, W = self.in_size
-        grad_input = t.zeros(self.in_size).cuda()
+        B, C, H, W = ctx.in_size
+        grad_input = t.zeros(ctx.in_size).cuda()
         stream = Stream(ptr=torch.cuda.current_stream().cuda_stream)
         args = [grad_output.data_ptr(),
-                self.argmax_data.data_ptr(),
-                self.rois.data_ptr(),
+                ctx.argmax_data.data_ptr(),
+                ctx.rois.data_ptr(),
                 grad_input.data_ptr(),
-                self.N, self.spatial_scale, C, H, W, self.outh, self.outw,
+                ctx.N, ctx.spatial_scale, C, H, W, ctx.outh, ctx.outw,
                 grad_input.numel()]
-        self.backward_fn(args=args,
+        backward_fn(args=args,
                          block=(CUDA_NUM_THREADS, 1, 1),
                          grid=(GET_BLOCKS(grad_input.numel()), 1, 1),
                          stream=stream
                          )
-        return grad_input, None
+        return grad_input, None, None, None, None
 
 
 class RoIPooling2D(t.nn.Module):
 
     def __init__(self, outh, outw, spatial_scale):
         super(RoIPooling2D, self).__init__()
-        self.RoI = RoI(outh, outw, spatial_scale)
+       # self.RoI = RoI(outh, outw, spatial_scale)
+        self.outh=outh
+        self.outw=outw
+        self.spatial_scale=spatial_scale
 
     def forward(self, x, rois):
-        return self.RoI(x, rois)
+        return RoI.apply(x, rois, self.outh, self.outw, self.spatial_scale)
 
 
 def test_roi_module():

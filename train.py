@@ -2,6 +2,8 @@ from __future__ import  absolute_import
 # though cupy is not used but without this line, it raise errors...
 import cupy as cp
 import os
+#import warnings
+#warnings.filterwarnings("ignore")
 
 import ipdb
 import matplotlib
@@ -25,7 +27,7 @@ resource.setrlimit(resource.RLIMIT_NOFILE, (20480, rlimit[1]))
 
 matplotlib.use('agg')
 
-
+#评估预测结果的好坏
 def eval(dataloader, faster_rcnn, test_num=10000):
     pred_bboxes, pred_labels, pred_scores = list(), list(), list()
     gt_bboxes, gt_labels, gt_difficults = list(), list(), list()
@@ -39,7 +41,7 @@ def eval(dataloader, faster_rcnn, test_num=10000):
         pred_labels += pred_labels_
         pred_scores += pred_scores_
         if ii == test_num: break
-
+    #预测评估
     result = eval_detection_voc(
         pred_bboxes, pred_labels, pred_scores,
         gt_bboxes, gt_labels, gt_difficults,
@@ -67,24 +69,30 @@ def train(**kwargs):
     faster_rcnn = FasterRCNNVGG16()
     print('model construct completed')
     trainer = FasterRCNNTrainer(faster_rcnn).cuda()
+    #读取预训练模型，如果为none,则默认是torchvision
     if opt.load_path:
         trainer.load(opt.load_path)
         print('load pretrained model from %s' % opt.load_path)
+    #可视化工作
     trainer.vis.text(dataset.db.label_names, win='labels')
     best_map = 0
     lr_ = opt.lr
     for epoch in range(opt.epoch):
+        #重设可视化界面的所有数据
         trainer.reset_meters()
         for ii, (img, bbox_, label_, scale) in tqdm(enumerate(dataloader)):
+            #设置缩放范围
             scale = at.scalar(scale)
             img, bbox, label = img.cuda().float(), bbox_.cuda(), label_.cuda()
+            #参数迭代优化一次
             trainer.train_step(img, bbox, label, scale)
-
+            #达到预定的画图次数，设置断点，进行可视化
             if (ii + 1) % opt.plot_every == 0:
                 if os.path.exists(opt.debug_file):
                     ipdb.set_trace()
 
                 # plot loss
+                #读取训练数据并上传可视化
                 trainer.vis.plot_many(trainer.get_meter_data())
 
                 # plot groud truth bboxes
@@ -107,6 +115,7 @@ def train(**kwargs):
                 # roi confusion matrix
                 trainer.vis.img('roi_cm', at.totensor(trainer.roi_cm.conf, False).float())
         eval_result = eval(test_dataloader, faster_rcnn, test_num=opt.test_num)
+        #可视化eval的maP结果
         trainer.vis.plot('test_map', eval_result['map'])
         lr_ = trainer.faster_rcnn.optimizer.param_groups[0]['lr']
         log_info = 'lr:{}, map:{},loss:{}'.format(str(lr_),
